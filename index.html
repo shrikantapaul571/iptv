@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device‑width, initial‑scale=1.0">
+  <title>IPTV Channel Viewer</title>
+  <!-- Include Font Awesome -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin:0; padding:20px; }
+    #container { display: flex; flex-direction: column; align-items: center; }
+    #searchBar { width: 80%; max-width: 500px; padding:10px; margin-bottom:20px; border:1px solid #ccc; border-radius:8px; }
+    #videoPlayer { width: 80%; max-width:800px; height:450px; background-color:black; margin-bottom:20px; }
+    #channelList { width: 80%; max-width:800px; background-color:white; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
+    #channelList ul { list-style-type:none; padding:0; margin:0; }
+    #channelList li { padding:10px; cursor:pointer; border-bottom:1px solid #ddd; display: flex; align-items: center; }
+    #channelList li:hover { background-color:#f0f0f0; }
+    #channelList img { width: 30px; height:30px; margin-right:10px; object-fit:contain; }
+    .favorite { font-size: 20px; cursor: pointer; margin-left: auto; color: #ccc; }
+    .favorite.selected { color: gold; }  /* Solid bookmark for favorite */
+    .favorite.square { color: #ccc; } /* Outline bookmark for non-favorite */
+    .channel-info { flex-grow: 1; display: flex; align-items: center; }
+    .playing { background-color: #d3ffd3; } /* Highlight currently playing channel */
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+
+<div id="container">
+  <input type="text" id="searchBar" placeholder="Search Channels…" onkeyup="filterChannels()">
+  
+  <div id="videoPlayer">
+    <video id="video" width="100%" height="100%" controls>Your browser does not support the video tag.</video>
+  </div>
+
+  <div id="channelList">
+    <ul id="channelListUl"></ul>
+  </div>
+</div>
+
+<script>
+  const channelRepoUrl = 'https://raw.githubusercontent.com/bugsfreeweb/LiveTVCollector/refs/heads/main/LiveTV/Bangladesh/LiveTV.json';
+  let allChannels = [];  // Will hold flattened list of channels
+  let favorites = JSON.parse(localStorage.getItem('favorites')) || [];  // Load favorites from localStorage
+  let currentChannel = null;  // Keep track of the currently playing channel
+
+  // Fetch the JSON file
+  fetch(channelRepoUrl)
+    .then(response => {
+      if (!response.ok) throw new Error('Network response was not ok');
+      return response.json();
+    })
+    .then(data => {
+      // Flatten channels across all groups into allChannels
+      const groups = data.channels;
+      for (const grp in groups) {
+        if (groups.hasOwnProperty(grp)) {
+          const chArray = groups[grp];
+          chArray.forEach(ch => {
+            allChannels.push(ch);
+          });
+        }
+      }
+      displayChannels(allChannels); // Show all channels initially
+    })
+    .catch(error => console.error('Error fetching JSON file:', error));
+
+  // Function to display channels with favorites at the top
+  function displayChannels(channelArray) {
+    const ul = document.getElementById('channelListUl');
+    ul.innerHTML = ''; // Clear existing list
+
+    // Sort channels: favorites first, then non-favorites
+    const sortedChannels = channelArray.sort((a, b) => {
+      const isFavoriteA = favorites.includes(a.url);
+      const isFavoriteB = favorites.includes(b.url);
+      return isFavoriteB - isFavoriteA; // Favorites first (true > false)
+    });
+
+    // Show sorted channels with their current favorite state (based on localStorage)
+    sortedChannels.forEach(channel => {
+      const isFavorite = favorites.includes(channel.url); // Check if the channel is in the favorites list
+      const isPlaying = currentChannel && currentChannel.url === channel.url; // Check if the channel is currently playing
+      createChannelElement(channel, isFavorite, isPlaying);
+    });
+  }
+
+  // Create channel element with a favorite button
+  function createChannelElement(channel, isFavorite, isPlaying) {
+    const ul = document.getElementById('channelListUl');
+    const li = document.createElement('li');
+    
+    // Add "playing" class if this channel is currently playing
+    if (isPlaying) {
+      li.classList.add('playing');
+    }
+
+    // Create the channel info section
+    const channelInfo = document.createElement('div');
+    channelInfo.classList.add('channel-info');
+    const logo = document.createElement('img');
+    logo.src = channel.logo || '';
+    logo.alt = channel.name || '';
+    channelInfo.appendChild(logo);
+    channelInfo.appendChild(document.createTextNode(channel.name || 'Unnamed Channel'));
+    
+    // Create favorite button (Font Awesome bookmark icon)
+    const favoriteBtn = document.createElement('span');
+    favoriteBtn.classList.add('favorite');
+    
+    // If it's a favorite, use fa-bookmark (solid), otherwise use fa-bookmark-o (regular)
+    favoriteBtn.innerHTML = isFavorite ? '<i class="fas fa-bookmark"></i>' : '<i class="far fa-bookmark"></i>';
+    
+    // Apply selected class if it's a favorite
+    if (isFavorite) {
+      favoriteBtn.classList.add('selected');
+    } else {
+      favoriteBtn.classList.add('square');
+    }
+
+    favoriteBtn.onclick = (event) => {
+      event.stopPropagation();  // Prevent the channel from playing when clicking the favorite button
+      toggleFavorite(channel.url); // Toggle favorite status when clicked
+    };
+
+    // Append the favorite button to the channel info section
+    channelInfo.appendChild(favoriteBtn);
+    li.appendChild(channelInfo);
+
+    // Play channel when clicking on the channel info (not the favorite button)
+    li.onclick = () => playChannel(channel.url, li); 
+
+    ul.appendChild(li);
+  }
+
+  // Toggle the favorite status of a channel
+  function toggleFavorite(channelUrl) {
+    if (favorites.includes(channelUrl)) {
+      favorites = favorites.filter(url => url !== channelUrl); // Remove from favorites
+    } else {
+      favorites.push(channelUrl); // Add to favorites
+    }
+    localStorage.setItem('favorites', JSON.stringify(favorites));  // Save favorites to localStorage
+    displayChannels(allChannels);  // Re-display the channels after updating favorites
+  }
+
+  // Play selected channel
+  function playChannel(url, li) {
+    const video = document.getElementById('video');
+    const previousChannel = currentChannel;
+
+    // If the same channel is clicked, do nothing
+    if (previousChannel && previousChannel.url === url) return;
+
+    currentChannel = { url, li }; // Set the new channel as the current channel
+
+    // If another channel is playing, remove the highlight from the previous one
+    if (previousChannel && previousChannel.li) {
+      previousChannel.li.classList.remove('playing');
+    }
+
+    // Highlight the current playing channel
+    li.classList.add('playing');
+    
+    // Set the video source and play it
+    if (!url) {
+      console.error('No URL for this channel');
+      return;
+    }
+    if (Hls.isSupported() && url.endsWith('.m3u8')) {
+      const hls = new Hls();
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play();
+      });
+    } 
+    else if (video.canPlayType('application/vnd.apple.mpegurl') && url.endsWith('.m3u8')) {
+      video.src = url;
+      video.play();
+    } 
+    else {
+      video.src = url;
+      video.play();
+    }
+  }
+
+  // Search function
+  function filterChannels() {
+    const term = document.getElementById('searchBar').value.toLowerCase();
+    const filtered = allChannels.filter(ch => (ch.name || '').toLowerCase().includes(term));
+    displayChannels(filtered);
+  }
+</script>
+
+</body>
+</html>
